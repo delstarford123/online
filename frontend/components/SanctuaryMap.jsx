@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ref, set, onValue, update, onDisconnect } from "firebase/database";
 import { db } from '../firebase';
 
-const SanctuaryMap = () => {
+const SanctuaryMap = ({ roomId = "default-room" }) => {
   const canvasRef = useRef(null);
   const requestRef = useRef();
   
@@ -20,19 +20,11 @@ const SanctuaryMap = () => {
   const SEAT_SIZE = 30;
   const AVATAR_RADIUS = 12;
 
-  const seats = [
-    { id: 1, x: 100, y: 150, label: '1A', status: 'empty' },
-    { id: 2, x: 150, y: 150, label: '1B', status: 'occupied' },
-    { id: 3, x: 200, y: 150, label: '1C', status: 'empty' },
-    { id: 4, x: 100, y: 250, label: '2A', status: 'empty' },
-    { id: 5, x: 450, y: 200, label: 'Row A', status: 'empty', width: 250, height: 40 },
-  ];
-
   /**
    * Firebase Functions
    */
   const joinChurch = (userId, initialX, initialY) => {
-    const userRef = ref(db, `rooms/main_sanctuary/users/${userId}`);
+    const userRef = ref(db, `services/${roomId}/users/${userId}`);
     set(userRef, {
       id: userId,
       x: initialX,
@@ -48,7 +40,7 @@ const SanctuaryMap = () => {
   };
 
   const updatePosition = (userId, newX, newY) => {
-    const userRef = ref(db, `rooms/main_sanctuary/users/${userId}`);
+    const userRef = ref(db, `services/${roomId}/users/${userId}`);
     update(userRef, {
       targetX: newX,
       targetY: newY,
@@ -61,14 +53,14 @@ const SanctuaryMap = () => {
     joinChurch(userId, localAvatar.x, localAvatar.y);
 
     // 2. Listen for all users
-    const usersRef = ref(db, 'rooms/main_sanctuary/users');
+    const usersRef = ref(db, `services/${roomId}/users`);
     const unsubscribe = onValue(usersRef, (snapshot) => {
       const data = snapshot.val() || {};
       setRemoteUsers(data);
     });
 
     return () => unsubscribe();
-  }, [userId]);
+  }, [userId, roomId]);
 
   /**
    * Animation & Rendering

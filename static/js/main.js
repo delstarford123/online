@@ -35,7 +35,8 @@ let activeUsers = {};
 let syncedPews = {};
 let localUserId = null;
 let localUserName = null;
-let localUserRole = 'member'; // Default RBAC role
+let localRoomId = null;
+let localUserRole = 'member'; 
 let localUserColor = `hsl(${Math.random() * 360}, 70%, 60%)`;
 
 // Agora State
@@ -48,25 +49,31 @@ const lobbyOverlay = document.getElementById('lobby-overlay');
 const canvasContainer = document.getElementById('canvas-container');
 const joinBtn = document.getElementById('join-btn');
 const usernameInput = document.getElementById('username-input');
+const roomIdInput = document.getElementById('room-id-input');
 const passcodeInput = document.getElementById('passcode-input');
 
 function setupLobby() {
     joinBtn.addEventListener('click', handleJoin);
-    usernameInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') handleJoin();
+    [usernameInput, roomIdInput, passcodeInput].forEach(input => {
+        if (input) {
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') handleJoin();
+            });
+        }
     });
 }
 
 async function handleJoin() {
     const name = usernameInput.value.trim();
+    const roomId = roomIdInput.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const passcode = passcodeInput.value.trim();
 
-    if (!name) {
-        alert("Please enter a name to join.");
+    if (!name || !roomId) {
+        alert("Please enter both your name and a Room ID to join.");
         return;
     }
 
-    console.log(`[Lobby] Attempting to join as: ${name}`);
+    console.log(`[Lobby] Attempting to join room: ${roomId} as: ${name}`);
     joinBtn.disabled = true;
     joinBtn.innerText = "Joining...";
 
@@ -74,7 +81,7 @@ async function handleJoin() {
         const response = await fetch('/api/join', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, passcode: passcode })
+            body: JSON.stringify({ name: name, room_id: roomId, passcode: passcode })
         });
 
         if (!response.ok) throw new Error('Registration failed');
@@ -84,16 +91,15 @@ async function handleJoin() {
 
         localUserId = userData.user_id;
         localUserName = userData.name;
+        localRoomId = userData.room_id;
         localUserRole = userData.role;
 
-        // Show role-based controls
         if (localUserRole === 'pastor') {
             document.getElementById('moderation-panel').style.display = 'block';
         } else {
             document.getElementById('member-controls').style.display = 'block';
         }
 
-        // Transitions
         lobbyOverlay.style.display = 'none';
         canvasContainer.style.display = 'block';
 
@@ -108,20 +114,19 @@ async function handleJoin() {
 }
 
 function initApplication(startX, startY) {
-    console.log("[App] Initializing Sanctuary Environment...");
+    console.log(`[App] Initializing Sanctuary for Room: ${localRoomId}...`);
     
-    canvas.width = WIDTH;
-    canvas.height = HEIGHT;
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
     
     pews = generatePewLayout();
     
-    // 1. Initialize Local User in Firebase
-    const userRef = ref(db, `church/users/${localUserId}`);
+    const userRef = ref(db, `services/${localRoomId}/users/${localUserId}`);
     set(userRef, {
         id: localUserId,
         agoraUid: agoraUid,
         name: localUserName,
-        role: localUserRole, // Sync role to Firebase
+        role: localUserRole, 
         color: localUserColor,
         x: startX,
         y: startY,
@@ -130,60 +135,88 @@ function initApplication(startX, startY) {
     });
     onDisconnect(userRef).remove();
 
-    // 2. Start Agora
-    initializeAgora(agoraUid);
+    initializeAgora(agoraUid, localRoomId);
 
-    // 3. Sync Listeners
-    onValue(ref(db, 'church/users'), (snapshot) => {
+    onValue(ref(db, `services/${localRoomId}/users`), (snapshot) => {
         activeUsers = snapshot.val() || {};
         updateUI();
         if (localUserRole === 'pastor') updateModerationPanel();
     });
 
-    // --- MODERATION: Individual User Listener ---
-    onValue(ref(db, `church/users/${localUserId}`), (snapshot) => {
+    onValue(ref(db, `services/${localRoomId}/users/${localUserId}`), (snapshot) => {
         const userData = snapshot.val();
         if (userData?.canSpeak && localUserRole === 'member') {
             if (localTracks.audioTrack) {
                 localTracks.audioTrack.setMuted(false);
                 showToast("You are now live!");
-                // Clear canSpeak so they don't get stuck live if they rejoin
-                update(ref(db, `church/users/${localUserId}`), { canSpeak: false });
+                update(ref(db, `services/${localRoomId}/users/${localUserId}`), { canSpeak: false });
             }
         }
     });
 
-    onValue(ref(db, 'church/pews'), (snapshot) => {
+    onValue(ref(db, `services/${localRoomId}/pews`), (snapshot) => {
         syncedPews = snapshot.val() || {};
     });
 
-    const chatQuery = query(ref(db, 'church/chat'), limitToLast(20));
+    const chatQuery = query(ref(db, `services/${localRoomId}/chat`), limitToLast(20));
     onValue(chatQuery, (snapshot) => {
         displayMessages(snapshot.val());
     });
 
-    // 3. Interactions
     canvas.addEventListener('mousedown', handleCanvasClick);
     document.getElementById('chat-send').addEventListener('click', sendMessage);
     document.getElementById('chat-input').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendMessage();
     });
 
-    // --- MODERATION & SPATIAL UI EVENTS ---
     document.getElementById('raise-hand-btn').addEventListener('click', toggleRaiseHand);
+    
+    const clearRoomBtn = document.getElementById('clear-room-btn');
+    if (clearRoomBtn) {
+        clearRoomBtn.addEventListener('click', async () => {
+            if (confirm("Are you sure you want to clear all data in this room?")) {
+                const response = await fetch('/api/clear-room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ room_id: localRoomId })
+                });
+                if (response.ok) {
+                    showToast("Room cleared successfully.");
+                } else {
+                    alert("Failed to clear room. Are you unauthorized?");
+                }
+            }
+        });
+    }
 
     requestAnimationFrame(gameLoop);
-    
-    // --- SPATIAL AUDIO LOOP (500ms) ---
     setInterval(updateSpatialAudio, 500);
 
     console.log("[App] Loop Started.");
 }
 
-// --- MODERATION HELPERS ---
+function resizeCanvas() {
+    const container = canvasContainer;
+    const padding = 20;
+    const availableWidth = window.innerWidth - padding;
+    const availableHeight = window.innerHeight - padding;
+    
+    const aspectRatio = WIDTH / HEIGHT;
+    
+    if (availableWidth / availableHeight > aspectRatio) {
+        canvas.style.height = `${availableHeight}px`;
+        canvas.style.width = `${availableHeight * aspectRatio}px`;
+    } else {
+        canvas.style.width = `${availableWidth}px`;
+        canvas.style.height = `${availableWidth / aspectRatio}px`;
+    }
+    
+    canvas.width = WIDTH;
+    canvas.height = HEIGHT;
+}
 
 async function toggleRaiseHand() {
-    const userRef = ref(db, `church/users/${localUserId}`);
+    const userRef = ref(db, `services/${localRoomId}/users/${localUserId}`);
     const isRaised = activeUsers[localUserId]?.handRaised || false;
     
     await update(userRef, { handRaised: !isRaised });
@@ -217,7 +250,7 @@ function updateModerationPanel() {
 }
 
 window.allowToSpeak = async (userId) => {
-    const userRef = ref(db, `church/users/${userId}`);
+    const userRef = ref(db, `services/${localRoomId}/users/${userId}`);
     await update(userRef, {
         canSpeak: true,
         handRaised: false
@@ -232,8 +265,6 @@ function showToast(message) {
     setTimeout(() => { toast.style.display = 'none'; }, 3000);
 }
 
-// --- SPATIAL AUDIO LOGIC ---
-
 function calculateDistance(x1, y1, x2, y2) {
     return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
 }
@@ -241,35 +272,23 @@ function calculateDistance(x1, y1, x2, y2) {
 function getVolumeFromDistance(distance) {
     const minDistance = 50;
     const maxDistance = 300;
-    
     if (distance <= minDistance) return 100;
     if (distance >= maxDistance) return 0;
-    
-    // Linear scale: 100 to 0
     return 100 * (1 - (distance - minDistance) / (maxDistance - minDistance));
 }
 
 function updateSpatialAudio() {
     if (!agoraClient || !activeUsers[localUserId]) return;
-
     const localUser = activeUsers[localUserId];
-    
-    // Get all remote users in the Agora channel
     const remoteUsers = agoraClient.remoteUsers;
-    
     remoteUsers.forEach(agoraUser => {
-        // Find the matching Firebase user by agoraUid
         const firebaseUser = Object.values(activeUsers).find(u => u.agoraUid == agoraUser.uid);
-        
         if (firebaseUser && agoraUser.audioTrack) {
             let volume = 100;
-
-            // Pastor Override: Pastor is always at 100% volume
             if (firebaseUser.role !== 'pastor') {
                 const distance = calculateDistance(localUser.x, localUser.y, firebaseUser.x, firebaseUser.y);
                 volume = getVolumeFromDistance(distance);
             }
-
             agoraUser.audioTrack.setVolume(Math.floor(volume));
         }
     });
@@ -277,43 +296,40 @@ function updateSpatialAudio() {
 
 function handleCanvasClick(event) {
     const rect = canvas.getBoundingClientRect();
-    const mouseX = event.clientX - rect.left;
-    const mouseY = event.clientY - rect.top;
+    const scaleX = WIDTH / rect.width;
+    const scaleY = HEIGHT / rect.height;
+    const mouseX = (event.clientX - rect.left) * scaleX;
+    const mouseY = (event.clientY - rect.top) * scaleY;
 
-    // --- RBAC SPATIAL BOUNDARY ---
     if (localUserRole === 'member' && mouseY < ALTAR_HEIGHT) {
         console.warn("Only Pastors can enter the stage.");
-        return; // Block movement
+        return; 
     }
 
     let seatClicked = false;
     pews.forEach(seat => {
         if (mouseX >= seat.x && mouseX <= seat.x + SEAT_WIDTH &&
             mouseY >= seat.y && mouseY <= seat.y + SEAT_HEIGHT) {
-            
             seatClicked = true;
-            const pewRef = ref(db, `church/pews/${seat.id}`);
+            const pewRef = ref(db, `services/${localRoomId}/pews/${seat.id}`);
             const currentOccupant = syncedPews[seat.id]?.occupiedBy;
-
             if (!currentOccupant) {
                 update(pewRef, { occupiedBy: localUserId, userName: localUserName });
-                update(ref(db, `church/users/${localUserId}`), {
+                update(ref(db, `services/${localRoomId}/users/${localUserId}`), {
                     targetX: seat.x + SEAT_WIDTH / 2,
                     targetY: seat.y + SEAT_HEIGHT / 2
                 });
             } else if (currentOccupant === localUserId) {
                 set(pewRef, null);
-                update(ref(db, `church/users/${localUserId}`), {
+                update(ref(db, `services/${localRoomId}/users/${localUserId}`), {
                     targetX: mouseX,
                     targetY: mouseY
                 });
             }
         }
     });
-
-    // If no seat clicked, just move there
     if (!seatClicked) {
-        update(ref(db, `church/users/${localUserId}`), {
+        update(ref(db, `services/${localRoomId}/users/${localUserId}`), {
             targetX: mouseX,
             targetY: mouseY
         });
@@ -324,7 +340,7 @@ function sendMessage() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (text) {
-        push(ref(db, 'church/chat'), {
+        push(ref(db, `services/${localRoomId}/chat`), {
             name: localUserName,
             text: text,
             timestamp: serverTimestamp()
@@ -337,7 +353,6 @@ function displayMessages(messages) {
     const container = document.getElementById('chat-messages');
     container.innerHTML = '';
     if (!messages) return;
-
     Object.values(messages).forEach(msg => {
         const div = document.createElement('div');
         div.className = 'chat-msg';
@@ -349,7 +364,6 @@ function displayMessages(messages) {
 
 function gameLoop() {
     drawChurchMap(ctx, pews);
-    
     Object.keys(activeUsers).forEach(id => {
         const user = activeUsers[id];
         if (user.x !== user.targetX || user.y !== user.targetY) {
@@ -357,49 +371,43 @@ function gameLoop() {
             user.y += (user.targetY - user.y) * 0.1;
         }
         drawAvatar(user);
-
-        // Update Agora Video Bubble Position
         if (user.agoraUid) {
             const videoBubble = document.getElementById(`player-${user.agoraUid}`);
             if (videoBubble) {
-                videoBubble.style.left = `${user.x - 25}px`;
-                videoBubble.style.top = `${user.y - 70}px`;
+                const rect = canvas.getBoundingClientRect();
+                const scale = rect.width / WIDTH;
+                videoBubble.style.left = `${(user.x - 25) * scale + rect.left}px`;
+                videoBubble.style.top = `${(user.y - 70) * scale + rect.top}px`;
+                videoBubble.style.width = `${50 * scale}px`;
+                videoBubble.style.height = `${50 * scale}px`;
             }
         }
     });
-
     requestAnimationFrame(gameLoop);
 }
 
 function drawAvatar(user) {
     const radius = 12;
-
-    // --- RBAC VISUAL DIFFERENTIATION ---
     if (user.role === 'pastor') {
-        ctx.strokeStyle = '#ffd700'; // Gold Halo
+        ctx.strokeStyle = '#ffd700';
         ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.arc(user.x, user.y, radius + 4, 0, Math.PI * 2);
         ctx.stroke();
     }
-
     ctx.fillStyle = user.color;
     ctx.beginPath();
     ctx.arc(user.x, user.y, radius, 0, Math.PI * 2);
     ctx.fill();
-    
     ctx.fillStyle = '#2d3436';
     ctx.font = 'bold 10px sans-serif';
     ctx.textAlign = 'center';
     const label = user.role === 'pastor' ? `[Pastor] ${user.name}` : user.name;
     ctx.fillText(label, user.x, user.y - radius - 10);
-    
-    // --- MODERATION: Hand Emoji ---
     if (user.handRaised) {
         ctx.font = '16px serif';
         ctx.fillText('✋', user.x + radius + 5, user.y - radius);
     }
-
     if (user.id === localUserId) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
@@ -453,18 +461,14 @@ function updateUI() {
     }
 }
 
-async function initializeAgora(uid) {
-    console.log(`[Agora] Initializing for UID: ${uid}`);
-    const channelName = 'main_sanctuary';
-    
+async function initializeAgora(uid, channelName) {
+    console.log(`[Agora] Initializing for UID: ${uid} in Channel: ${channelName}`);
     try {
         const response = await fetch(`/api/rtc-token?uid=${uid}&channel_name=${channelName}`);
         const data = await response.json();
         const token = data.token;
         const appId = data.appId;
-
         agoraClient = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-
         agoraClient.on("user-published", async (user, mediaType) => {
             await agoraClient.subscribe(user, mediaType);
             if (mediaType === "video") {
@@ -472,14 +476,13 @@ async function initializeAgora(uid) {
                 const playerContainer = document.createElement("div");
                 playerContainer.id = `player-${user.uid}`;
                 playerContainer.className = "video-bubble";
-                playerContainer.style.width = "50px";
-                playerContainer.style.height = "50px";
+                playerContainer.style.position = "fixed";
                 playerContainer.style.borderRadius = "50%";
                 playerContainer.style.overflow = "hidden";
-                playerContainer.style.position = "absolute";
                 playerContainer.style.border = "2px solid white";
                 playerContainer.style.backgroundColor = "black";
                 playerContainer.style.zIndex = "5";
+                playerContainer.style.pointerEvents = "none";
                 document.getElementById("video-container").append(playerContainer);
                 remoteVideoTrack.play(playerContainer);
             }
@@ -487,44 +490,39 @@ async function initializeAgora(uid) {
                 user.audioTrack.play();
             }
         });
-
         agoraClient.on("user-unpublished", (user) => {
             const playerContainer = document.getElementById(`player-${user.uid}`);
             if (playerContainer) playerContainer.remove();
         });
-
         await agoraClient.join(appId, channelName, token, uid);
-
         localTracks.audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
         localTracks.videoTrack = await AgoraRTC.createCameraVideoTrack();
 
-        // --- MODERATION: Default Mute State ---
-        if (localUserRole === 'member') {
+        // --- AUTOMATIC AUDIO FOR PASTORS ---
+        if (localUserRole === 'pastor') {
+            localTracks.audioTrack.setMuted(false);
+            console.log("[Moderation] Pastor joined with microphone active.");
+            showToast("You are live! Your microphone is active.");
+        } else {
             localTracks.audioTrack.setMuted(true);
             console.log("[Moderation] Member joined muted.");
         }
-
         const localPlayerContainer = document.createElement("div");
         localPlayerContainer.id = `player-${uid}`;
         localPlayerContainer.className = "video-bubble";
-        localPlayerContainer.style.width = "50px";
-        localPlayerContainer.style.height = "50px";
+        localPlayerContainer.style.position = "fixed";
         localPlayerContainer.style.borderRadius = "50%";
         localPlayerContainer.style.overflow = "hidden";
-        localPlayerContainer.style.position = "absolute";
         localPlayerContainer.style.border = "2px solid #3498db";
         localPlayerContainer.style.backgroundColor = "black";
         localPlayerContainer.style.zIndex = "5";
+        localPlayerContainer.style.pointerEvents = "none";
         document.getElementById("video-container").append(localPlayerContainer);
         localTracks.videoTrack.play(localPlayerContainer);
-
         await agoraClient.publish([localTracks.audioTrack, localTracks.videoTrack]);
-        console.log("[Agora] Local tracks published.");
-
     } catch (err) {
         console.error("[Agora] Initialization failed", err);
     }
 }
 
-// Start in Lobby Mode
 setupLobby();

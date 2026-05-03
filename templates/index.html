@@ -46,21 +46,38 @@
             background: white;
             color: #2c3e50;
             padding: 40px;
-            border-radius: 12px;
+            border-radius: 16px;
             text-align: center;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            max-width: 400px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+            max-width: 450px;
             width: 90%;
+            border: 1px solid rgba(255,255,255,0.1);
         }
-        .lobby-card h1 { margin-bottom: 20px; font-size: 24px; }
+        .lobby-card h1 { margin-bottom: 10px; font-size: 28px; color: #3498db; }
+        .lobby-card p { margin-bottom: 25px; color: #7f8c8d; }
+        .input-group {
+            margin-bottom: 15px;
+            text-align: left;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #34495e;
+        }
         .lobby-card input {
             width: 100%;
             padding: 12px;
-            margin-bottom: 20px;
-            border: 2px solid #ddd;
-            border-radius: 6px;
+            border: 2px solid #edeff2;
+            border-radius: 8px;
             font-size: 16px;
             box-sizing: border-box;
+            transition: border-color 0.3s;
+        }
+        .lobby-card input:focus {
+            border-color: #3498db;
+            outline: none;
         }
         .lobby-card button {
             width: 100%;
@@ -68,13 +85,15 @@
             background: #3498db;
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 18px;
             font-weight: bold;
             cursor: pointer;
-            transition: background 0.3s;
+            transition: all 0.3s;
+            margin-top: 10px;
         }
-        .lobby-card button:hover { background: #2980b9; }
+        .lobby-card button:hover { background: #2980b9; transform: translateY(-2px); }
+        .lobby-card button:active { transform: translateY(0); }
 
         #ui-overlay {
             position: absolute;
@@ -213,9 +232,23 @@
     <div id="lobby-overlay">
         <div class="lobby-card">
             <h1>Sanctuary Lobby</h1>
-            <p>Please enter your name to join the service.</p>
-            <input type="text" id="username-input" placeholder="Your Name" maxlength="20">
-            <input type="password" id="passcode-input" placeholder="Admin Passcode (Optional)" maxlength="20">
+            <p>Connect with your community in a virtual space.</p>
+            
+            <div class="input-group">
+                <label for="username-input">Your Name</label>
+                <input type="text" id="username-input" placeholder="e.g. John Doe" maxlength="20">
+            </div>
+
+            <div class="input-group">
+                <label for="room-id-input">Service / Room ID</label>
+                <input type="text" id="room-id-input" placeholder="e.g. sunday-morning" maxlength="30">
+            </div>
+            
+            <div class="input-group">
+                <label for="passcode-input">Admin Passcode (Optional)</label>
+                <input type="password" id="passcode-input" placeholder="Enter if you are the host" maxlength="20">
+            </div>
+
             <button id="join-btn">Join Service</button>
         </div>
     </div>
@@ -246,6 +279,8 @@
             <ul id="raised-hands-list">
                 <!-- Dynamically populated -->
             </ul>
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 15px 0;">
+            <button id="clear-room-btn" style="width: 100%; padding: 10px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Clear All Users</button>
         </div>
     </div>
 

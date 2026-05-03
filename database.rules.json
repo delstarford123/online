@@ -1,6 +1,18 @@
 {
   "rules": {
-    ".read": "true",
-    ".write": "true"
+    "services": {
+      "$serviceId": {
+        ".read": "true",
+        ".write": "true",
+        "users": {
+          "$userId": {
+            ".validate": "newData.hasChildren(['name', 'role', 'x', 'y'])"
+          }
+        },
+        "chat": {
+          ".indexOn": ["timestamp"]
+        }
+      }
+    }
   }
 }

@@ -96,47 +96,56 @@ import uuid
 def join_service():
     """
     Public registration endpoint with optional RBAC passcode.
-    Expects: { "name": "string", "passcode": "string" }
+    Expects: { "name": "string", "room_id": "string", "passcode": "string" }
     """
     data = request.json
-    if not data or 'name' not in data:
-        return jsonify({"error": "Name is required"}), 400
+    if not data or 'name' not in data or 'room_id' not in data:
+        return jsonify({"error": "Name and Room ID are required"}), 400
     
     user_id = str(uuid.uuid4())
     user_name = data['name']
+    room_id = data['room_id']
     passcode = data.get('passcode', '')
     
     # Simple RBAC Logic
+    # In a real app, you'd check this against a database of service owners
     role = 'pastor' if passcode == 'pastor123' else 'member'
     
-    # Return identity, role, and starting position
     return jsonify({
         "user_id": user_id,
         "name": user_name,
+        "room_id": room_id,
         "role": role,
         "startX": 400,
         "startY": 550,
-        "message": f"Welcome, {role} {user_name}!"
+        "message": f"Welcome to {room_id}, {role} {user_name}!"
     }), 200
 
 @app.route('/api/room-status', methods=['GET'])
 def get_room_status():
-    """Fetch the current state of the sanctuary room."""
+    """Fetch the current state of a specific room."""
+    room_id = request.args.get('room_id')
+    if not room_id:
+        return jsonify({"error": "room_id is required"}), 400
     try:
-        ref = db.reference('rooms/main_sanctuary')
+        ref = db.reference(f'services/{room_id}')
         snapshot = ref.get()
         return jsonify(snapshot), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/clear-users', methods=['POST'])
+@app.route('/api/clear-room', methods=['POST'])
 @require_auth
-def clear_users():
-    """Administrative route to clear all active users."""
+def clear_room():
+    """Administrative route to clear all data in a room (users, pews, chat)."""
+    data = request.json
+    room_id = data.get('room_id')
+    if not room_id:
+        return jsonify({"error": "room_id is required"}), 400
     try:
-        ref = db.reference('rooms/main_sanctuary/users')
+        ref = db.reference(f'services/{room_id}')
         ref.delete()
-        return jsonify({"message": "All users cleared"}), 200
+        return jsonify({"message": f"Room {room_id} cleared completely"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
