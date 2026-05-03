@@ -41,8 +41,77 @@ let localUserColor = `hsl(${Math.random() * 360}, 70%, 60%)`;
 
 // Agora State
 let agoraClient = null;
-let localTracks = { videoTrack: null, audioTrack: null };
+let screenClient = null;
+let localTracks = { videoTrack: null, audioTrack: null, screenTrack: null };
 let agoraUid = Math.floor(Math.random() * 1000000); 
+
+let activeReactions = []; // Local list of reactions to animate
+
+// --- GLOBAL HELPERS FOR INDEX.HTML ---
+window.sendReaction = (emoji) => {
+    if (!localUserId || !localRoomId) return;
+    const reactionRef = ref(db, `services/${localRoomId}/reactions`);
+    push(reactionRef, {
+        userId: localUserId,
+        emoji: emoji,
+        timestamp: serverTimestamp()
+    });
+};
+
+async function toggleScreenShare() {
+    const btn = document.getElementById('screen-share-btn');
+    
+    if (!localTracks.screenTrack) {
+        try {
+            console.log("[Agora] Starting screen share...");
+            localTracks.screenTrack = await AgoraRTC.createScreenVideoTrack();
+            
+            localTracks.screenTrack.on("track-ended", () => {
+                stopScreenShare();
+            });
+
+            if (!screenClient) {
+                screenClient = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+            }
+            
+            const screenUid = agoraUid + 1000;
+            const response = await fetch(`/api/rtc-token?uid=${screenUid}&channel_name=${localRoomId}`);
+            const { token, appId } = await response.json();
+            
+            await screenClient.join(appId, localRoomId, token, screenUid);
+            await screenClient.publish(localTracks.screenTrack);
+            
+            await update(ref(db, `services/${localRoomId}`), { 
+                screenShareActive: true, 
+                screenShareUid: screenUid 
+            });
+
+            btn.classList.add('active');
+            btn.innerText = "Stop Sharing 🛑";
+            showToast("Screen sharing started!");
+
+        } catch (err) {
+            console.error("[Agora] Screen share failed", err);
+            showToast("Screen share cancelled.");
+        }
+    } else {
+        stopScreenShare();
+    }
+}
+
+async function stopScreenShare() {
+    const btn = document.getElementById('screen-share-btn');
+    if (localTracks.screenTrack) {
+        localTracks.screenTrack.close();
+        localTracks.screenTrack = null;
+    }
+    if (screenClient) {
+        await screenClient.leave();
+    }
+    await update(ref(db, `services/${localRoomId}`), { screenShareActive: false });
+    btn.classList.remove('active');
+    btn.innerText = "Share Screen 🖥️";
+}
 
 // --- DOM ELEMENTS ---
 const lobbyOverlay = document.getElementById('lobby-overlay');
@@ -163,6 +232,27 @@ function initApplication(startX, startY) {
         displayMessages(snapshot.val());
     });
 
+    const reactionsRef = query(ref(db, `services/${localRoomId}/reactions`), limitToLast(5));
+    onValue(reactionsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            Object.values(data).forEach(reaction => {
+                if (Date.now() - reaction.timestamp < 2000) {
+                    const user = activeUsers[reaction.userId];
+                    if (user) {
+                        activeReactions.push({
+                            emoji: reaction.emoji,
+                            x: user.x,
+                            y: user.y - 30,
+                            opacity: 1.0,
+                            life: 60 
+                        });
+                    }
+                }
+            });
+        }
+    });
+
     canvas.addEventListener('mousedown', handleCanvasClick);
     document.getElementById('chat-send').addEventListener('click', sendMessage);
     document.getElementById('chat-input').addEventListener('keypress', (e) => {
@@ -171,6 +261,12 @@ function initApplication(startX, startY) {
 
     document.getElementById('raise-hand-btn').addEventListener('click', toggleRaiseHand);
     
+    if (localUserRole === 'pastor') {
+        const ssBtn = document.getElementById('screen-share-btn');
+        ssBtn.style.display = 'flex';
+        ssBtn.addEventListener('click', toggleScreenShare);
+    }
+
     const clearRoomBtn = document.getElementById('clear-room-btn');
     if (clearRoomBtn) {
         clearRoomBtn.addEventListener('click', async () => {
@@ -196,13 +292,10 @@ function initApplication(startX, startY) {
 }
 
 function resizeCanvas() {
-    const container = canvasContainer;
     const padding = 20;
     const availableWidth = window.innerWidth - padding;
     const availableHeight = window.innerHeight - padding;
-    
     const aspectRatio = WIDTH / HEIGHT;
-    
     if (availableWidth / availableHeight > aspectRatio) {
         canvas.style.height = `${availableHeight}px`;
         canvas.style.width = `${availableHeight * aspectRatio}px`;
@@ -210,7 +303,6 @@ function resizeCanvas() {
         canvas.style.width = `${availableWidth}px`;
         canvas.style.height = `${availableWidth / aspectRatio}px`;
     }
-    
     canvas.width = WIDTH;
     canvas.height = HEIGHT;
 }
@@ -218,9 +310,7 @@ function resizeCanvas() {
 async function toggleRaiseHand() {
     const userRef = ref(db, `services/${localRoomId}/users/${localUserId}`);
     const isRaised = activeUsers[localUserId]?.handRaised || false;
-    
     await update(userRef, { handRaised: !isRaised });
-    
     const btn = document.getElementById('raise-hand-btn');
     if (!isRaised) {
         btn.classList.add('raised');
@@ -234,7 +324,6 @@ async function toggleRaiseHand() {
 function updateModerationPanel() {
     const list = document.getElementById('raised-hands-list');
     list.innerHTML = '';
-    
     Object.keys(activeUsers).forEach(id => {
         const user = activeUsers[id];
         if (user.handRaised) {
@@ -251,11 +340,7 @@ function updateModerationPanel() {
 
 window.allowToSpeak = async (userId) => {
     const userRef = ref(db, `services/${localRoomId}/users/${userId}`);
-    await update(userRef, {
-        canSpeak: true,
-        handRaised: false
-    });
-    console.log(`[Moderation] Allowed ${userId} to speak.`);
+    await update(userRef, { canSpeak: true, handRaised: false });
 };
 
 function showToast(message) {
@@ -300,11 +385,7 @@ function handleCanvasClick(event) {
     const scaleY = HEIGHT / rect.height;
     const mouseX = (event.clientX - rect.left) * scaleX;
     const mouseY = (event.clientY - rect.top) * scaleY;
-
-    if (localUserRole === 'member' && mouseY < ALTAR_HEIGHT) {
-        console.warn("Only Pastors can enter the stage.");
-        return; 
-    }
+    if (localUserRole === 'member' && mouseY < ALTAR_HEIGHT) return; 
 
     let seatClicked = false;
     pews.forEach(seat => {
@@ -321,18 +402,12 @@ function handleCanvasClick(event) {
                 });
             } else if (currentOccupant === localUserId) {
                 set(pewRef, null);
-                update(ref(db, `services/${localRoomId}/users/${localUserId}`), {
-                    targetX: mouseX,
-                    targetY: mouseY
-                });
+                update(ref(db, `services/${localRoomId}/users/${localUserId}`), { targetX: mouseX, targetY: mouseY });
             }
         }
     });
     if (!seatClicked) {
-        update(ref(db, `services/${localRoomId}/users/${localUserId}`), {
-            targetX: mouseX,
-            targetY: mouseY
-        });
+        update(ref(db, `services/${localRoomId}/users/${localUserId}`), { targetX: mouseX, targetY: mouseY });
     }
 }
 
@@ -340,11 +415,7 @@ function sendMessage() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (text) {
-        push(ref(db, `services/${localRoomId}/chat`), {
-            name: localUserName,
-            text: text,
-            timestamp: serverTimestamp()
-        });
+        push(ref(db, `services/${localRoomId}/chat`), { name: localUserName, text: text, timestamp: serverTimestamp() });
         input.value = '';
     }
 }
@@ -364,6 +435,29 @@ function displayMessages(messages) {
 
 function gameLoop() {
     drawChurchMap(ctx, pews);
+    
+    const remoteScreenUser = agoraClient.remoteUsers.find(u => u.uid % 1000 === 0 && u.videoTrack); 
+    if (remoteScreenUser && remoteScreenUser.videoTrack) {
+        const projectorX = WIDTH / 2 - 150;
+        const projectorY = 20;
+        const projectorW = 300;
+        const projectorH = 100;
+        const projectorOverlay = document.getElementById('projector-overlay') || createProjectorOverlay();
+        const rect = canvas.getBoundingClientRect();
+        const scale = rect.width / WIDTH;
+        projectorOverlay.style.left = `${(projectorX * scale) + rect.left}px`;
+        projectorOverlay.style.top = `${(projectorY * scale) + rect.top}px`;
+        projectorOverlay.style.width = `${projectorW * scale}px`;
+        projectorOverlay.style.height = `${projectorH * scale}px`;
+        projectorOverlay.style.display = 'block';
+        if (!projectorOverlay.hasChildNodes()) {
+            remoteScreenUser.videoTrack.play(projectorOverlay);
+        }
+    } else {
+        const overlay = document.getElementById('projector-overlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
     Object.keys(activeUsers).forEach(id => {
         const user = activeUsers[id];
         if (user.x !== user.targetX || user.y !== user.targetY) {
@@ -383,7 +477,30 @@ function gameLoop() {
             }
         }
     });
+
+    activeReactions = activeReactions.filter(r => r.life > 0);
+    activeReactions.forEach(r => {
+        ctx.globalAlpha = r.opacity;
+        ctx.font = '24px serif';
+        ctx.fillText(r.emoji, r.x, r.y);
+        r.y -= 1;
+        r.opacity -= 0.015;
+        r.life--;
+    });
+    ctx.globalAlpha = 1.0;
     requestAnimationFrame(gameLoop);
+}
+
+function createProjectorOverlay() {
+    const div = document.createElement('div');
+    div.id = 'projector-overlay';
+    div.style.position = 'fixed';
+    div.style.backgroundColor = '#000';
+    div.style.zIndex = '4';
+    div.style.pointerEvents = 'none';
+    div.style.border = '4px solid #34495e';
+    document.body.appendChild(div);
+    return div;
 }
 
 function drawAvatar(user) {
@@ -427,6 +544,17 @@ function drawChurchMap(ctx, pewsArray) {
     ctx.fillStyle = '#2d3436';
     ctx.fillRect(WIDTH / 2 - 2, 20, 4, 60);
     ctx.fillRect(WIDTH / 2 - 20, 35, 40, 4);
+    
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(WIDTH / 2 - 150, 20, 300, 100);
+    ctx.strokeStyle = '#34495e';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(WIDTH / 2 - 150, 20, 300, 100);
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText("VIRTUAL PROJECTOR", WIDTH / 2, 80);
+
     pewsArray.forEach(seat => {
         ctx.fillStyle = syncedPews[seat.id] ? '#e74c3c' : '#ffffff';
         ctx.strokeStyle = '#b2bec3';
@@ -456,13 +584,10 @@ function generatePewLayout() {
 
 function updateUI() {
     const userInfo = document.getElementById('user-info');
-    if (userInfo) {
-        userInfo.innerText = `${localUserName} | Users Online: ${Object.keys(activeUsers).length}`;
-    }
+    if (userInfo) userInfo.innerText = `${localUserName} | Users Online: ${Object.keys(activeUsers).length}`;
 }
 
 async function initializeAgora(uid, channelName) {
-    console.log(`[Agora] Initializing for UID: ${uid} in Channel: ${channelName}`);
     try {
         const response = await fetch(`/api/rtc-token?uid=${uid}&channel_name=${channelName}`);
         const data = await response.json();
@@ -486,9 +611,7 @@ async function initializeAgora(uid, channelName) {
                 document.getElementById("video-container").append(playerContainer);
                 remoteVideoTrack.play(playerContainer);
             }
-            if (mediaType === "audio") {
-                user.audioTrack.play();
-            }
+            if (mediaType === "audio") user.audioTrack.play();
         });
         agoraClient.on("user-unpublished", (user) => {
             const playerContainer = document.getElementById(`player-${user.uid}`);
@@ -497,15 +620,11 @@ async function initializeAgora(uid, channelName) {
         await agoraClient.join(appId, channelName, token, uid);
         localTracks.audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
         localTracks.videoTrack = await AgoraRTC.createCameraVideoTrack();
-
-        // --- AUTOMATIC AUDIO FOR PASTORS ---
         if (localUserRole === 'pastor') {
             localTracks.audioTrack.setMuted(false);
-            console.log("[Moderation] Pastor joined with microphone active.");
             showToast("You are live! Your microphone is active.");
         } else {
             localTracks.audioTrack.setMuted(true);
-            console.log("[Moderation] Member joined muted.");
         }
         const localPlayerContainer = document.createElement("div");
         localPlayerContainer.id = `player-${uid}`;
