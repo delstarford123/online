@@ -1,0 +1,17 @@
+# Python environment
+.venv/
+__pycache__/
+*.py[cod]
+
+# Firebase / Secrets
+.env
+online-3db34-firebase-adminsdk-*.json
+ServiceAccountKey.json
+
+# Frontend
+node_modules/
+dist/
+.DS_Store
+
+# Git
+.git/

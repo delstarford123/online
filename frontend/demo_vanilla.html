@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Church Sanctuary - Avatar Movement</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            background-color: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        canvas {
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            background-color: #fafafa;
+            cursor: crosshair;
+            margin-top: 10px;
+        }
+        .instructions {
+            margin-top: 15px;
+            color: #555;
+            font-size: 0.95em;
+        }
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.9em; }
+        .box { width: 14px; height: 14px; border: 1px solid #333; border-radius: 2px; }
+        .circle { width: 14px; height: 14px; border: 1px solid #333; border-radius: 50%; }
+        .empty { background-color: #2ecc71; }
+        .occupied { background-color: #e74c3c; }
+        .avatar-color { background-color: #3498db; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Sanctuary Virtual Environment</h2>
+    
+    <div class="legend">
+        <div class="legend-item"><div class="box empty"></div><span>Empty Seat</span></div>
+        <div class="legend-item"><div class="box occupied"></div><span>Occupied</span></div>
+        <div class="legend-item"><div class="circle avatar-color"></div><span>You (Avatar)</span></div>
+    </div>
+
+    <canvas id="sanctuaryCanvas" width="800" height="600"></canvas>
+
+    <p class="instructions">
+        Click on an <strong>empty green seat</strong> to move your avatar there.
+    </p>
+</div>
+
+<script>
+    /**
+     * Avatar Class
+     */
+    class Avatar {
+        constructor(id, x, y, name, color) {
+            this.id = id;
+            this.x = x;
+            this.y = y;
+            this.targetX = x;
+            this.targetY = y;
+            this.name = name;
+            this.color = color;
+            this.radius = 12;
+            this.speed = 0.08; // Lerp factor
+        }
+
+        update() {
+            // Smoothly interpolate towards target
+            const dx = this.targetX - this.x;
+            const dy = this.targetY - this.y;
+
+            if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+                this.x += dx * this.speed;
+                this.y += dy * this.speed;
+            } else {
+                this.x = this.targetX;
+                this.y = this.targetY;
+            }
+        }
+
+        draw(ctx) {
+            ctx.save();
+            // Shadow
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = 'rgba(0,0,0,0.2)';
+            
+            // Body
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+            ctx.strokeStyle = '#2c3e50';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Name tag
+            ctx.restore();
+            ctx.fillStyle = '#2c3e50';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(this.name, this.x, this.y - 20);
+        }
+
+        setTarget(tx, ty) {
+            this.targetX = tx;
+            this.targetY = ty;
+        }
+    }
+
+    const canvas = document.getElementById('sanctuaryCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const GRID_WIDTH = 800;
+    const GRID_HEIGHT = 600;
+    const SEAT_SIZE = 30;
+
+    // Initialize Avatar at entrance
+    const myAvatar = new Avatar('user-123', 400, 550, 'Me', '#3498db');
+
+    // Seat Data
+    const seats = [
+        { id: 1, x: 100, y: 150, label: '1A', status: 'empty' },
+        { id: 2, x: 150, y: 150, label: '1B', status: 'occupied' },
+        { id: 3, x: 200, y: 150, label: '1C', status: 'empty' },
+        { id: 4, x: 100, y: 250, label: '2A', status: 'empty' },
+        { id: 5, x: 150, y: 250, label: '2B', status: 'empty' },
+        { id: 6, x: 200, y: 250, label: '2C', status: 'empty' },
+        { id: 7, x: 450, y: 200, label: 'Row A', status: 'empty', width: 250, height: 40 },
+        { id: 8, x: 450, y: 300, label: 'Row B', status: 'empty', width: 250, height: 40 },
+    ];
+
+    function render() {
+        // 1. Clear
+        ctx.clearRect(0, 0, GRID_WIDTH, GRID_HEIGHT);
+
+        // 2. Draw Environment (Grid)
+        ctx.strokeStyle = '#f0f0f0';
+        for (let x = 0; x <= GRID_WIDTH; x += 50) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, GRID_HEIGHT); ctx.stroke();
+        }
+        for (let y = 0; y <= GRID_HEIGHT; y += 50) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(GRID_WIDTH, y); ctx.stroke();
+        }
+
+        // 3. Draw Altar
+        ctx.fillStyle = '#bdc3c7';
+        ctx.fillRect(300, 20, 200, 60);
+        ctx.fillStyle = '#2c3e50';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('ALTAR / PULPIT', 400, 55);
+
+        // 4. Draw Seats
+        seats.forEach(seat => {
+            const w = seat.width || SEAT_SIZE;
+            const h = seat.height || SEAT_SIZE;
+            ctx.fillStyle = seat.status === 'occupied' ? '#e74c3c' : '#2ecc71';
+            ctx.fillRect(seat.x, seat.y, w, h);
+            ctx.strokeRect(seat.x, seat.y, w, h);
+            ctx.fillStyle = '#7f8c8d';
+            ctx.font = '10px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(seat.label, seat.x, seat.y - 5);
+        });
+
+        // 5. Update and Draw Avatar
+        myAvatar.update();
+        myAvatar.draw(ctx);
+
+        requestAnimationFrame(render);
+    }
+
+    canvas.addEventListener('click', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const clickedSeat = seats.find(s => {
+            const w = s.width || SEAT_SIZE;
+            const h = s.height || SEAT_SIZE;
+            return x >= s.x && x <= s.x + w && y >= s.y && y <= s.y + h;
+        });
+
+        if (clickedSeat && clickedSeat.status === 'empty') {
+            const tx = clickedSeat.x + (clickedSeat.width || SEAT_SIZE) / 2;
+            const ty = clickedSeat.y + (clickedSeat.height || SEAT_SIZE) / 2;
+            myAvatar.setTarget(tx, ty);
+            console.log(`Moving to seat ${clickedSeat.label} (${tx}, ${ty})`);
+        }
+    });
+
+    // Start Loop
+    render();
+</script>
+
+</body>
+</html>
