@@ -36,6 +36,7 @@ let syncedPews = {};
 let localUserId = null;
 let localUserName = null;
 let localRoomId = null;
+let currentAgoraChannel = null;
 let localUserRole = 'member'; 
 let localUserColor = `hsl(${Math.random() * 360}, 70%, 60%)`;
 
@@ -46,6 +47,152 @@ let localTracks = { videoTrack: null, audioTrack: null, screenTrack: null };
 let agoraUid = Math.floor(Math.random() * 1000000); 
 
 let activeReactions = []; // Local list of reactions to animate
+
+// --- BREAKOUT ROOM DEFINITIONS ---
+const BREAKOUT_ROOMS = [
+    { id: 'main', name: 'Main Sanctuary', x: 0, y: 0, w: 800, h: 600, color: 'transparent' },
+    { id: 'prayer', name: 'Prayer Room', x: 10, y: 440, w: 150, h: 150, color: 'rgba(52, 152, 219, 0.2)' },
+    { id: 'school', name: 'Sunday School', x: 640, y: 440, w: 150, h: 150, color: 'rgba(46, 204, 113, 0.2)' }
+];
+
+function getRoomAt(x, y) {
+    // Check breakout rooms first (they are smaller/on top)
+    const school = BREAKOUT_ROOMS.find(r => r.id === 'school');
+    const prayer = BREAKOUT_ROOMS.find(r => r.id === 'prayer');
+    
+    if (x >= school.x && x <= school.x + school.w && y >= school.y && y <= school.y + school.h) return school;
+    if (x >= prayer.x && x <= prayer.x + prayer.w && y >= prayer.y && y <= prayer.y + prayer.h) return prayer;
+    
+    return BREAKOUT_ROOMS[0]; // Default to Main
+}
+
+// ... (existing helper functions)
+
+async function switchAgoraChannel(newChannelId) {
+    if (currentAgoraChannel === newChannelId) return;
+    
+    console.log(`[Agora] Switching to channel: ${newChannelId}`);
+    
+    // 1. Leave current
+    if (agoraClient) {
+        await agoraClient.leave();
+    }
+    
+    // 2. Initialize/Join new
+    const fullChannelName = `${localRoomId}_${newChannelId}`;
+    await initializeAgora(agoraUid, fullChannelName);
+    currentAgoraChannel = newChannelId;
+    
+    showToast(`You entered: ${BREAKOUT_ROOMS.find(r => r.id === newChannelId).name}`);
+}
+
+// ... (rest of the helpers)
+
+// --- BIBLE SIDEBAR LOGIC ---
+function setupBibleSidebar() {
+    const sidebar = document.getElementById('bible-sidebar');
+    const toggle = document.getElementById('bible-toggle');
+    toggle.addEventListener('click', () => sidebar.classList.toggle('open'));
+
+    const pushBtn = document.getElementById('push-verse-btn');
+    const refInput = document.getElementById('bible-ref-input');
+
+    if (pushBtn) {
+        pushBtn.addEventListener('click', async () => {
+            const reference = refInput.value.trim();
+            if (!reference) return;
+
+            // Simple mock for Bible API (in real use, fetch from api.bible)
+            const mockText = `This is a simulated scripture text for "${reference}". In a production environment, this would be fetched in real-time from the Bible API.`;
+            
+            await update(ref(db, `services/${localRoomId}`), {
+                currentScripture: {
+                    reference: reference,
+                    text: mockText,
+                    pushedBy: localUserName
+                }
+            });
+            refInput.value = '';
+        });
+    }
+
+    // Listener for shared scripture
+    onValue(ref(db, `services/${localRoomId}/currentScripture`), (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            document.getElementById('current-verse-ref').innerText = data.reference;
+            document.getElementById('verse-text').innerText = data.text;
+            
+            // Auto-open sidebar for members when pastor pushes
+            if (!sidebar.classList.contains('open')) {
+                sidebar.classList.add('open');
+                showToast(`Pastor shared a verse: ${data.reference}`);
+            }
+        }
+    });
+}
+
+// ... (initApplication updates)
+
+function initApplication(startX, startY) {
+    // ...
+    
+    setupBibleSidebar();
+    if (localUserRole === 'pastor') {
+        document.getElementById('pastor-bible-controls').style.display = 'block';
+    }
+
+    currentAgoraChannel = 'main'; // Initial channel
+    
+    // ... rest of listeners
+}
+
+// ... (gameLoop updates)
+
+function gameLoop() {
+    drawChurchMap(ctx, pews);
+    
+    // ... screen share logic
+    
+    Object.keys(activeUsers).forEach(id => {
+        const user = activeUsers[id];
+        // ... movement
+        
+        // --- SPATIAL CHANNEL SWITCHING (LOCAL USER ONLY) ---
+        if (id === localUserId) {
+            const room = getRoomAt(user.x, user.y);
+            if (room.id !== currentAgoraChannel) {
+                switchAgoraChannel(room.id);
+            }
+        }
+
+        drawAvatar(user);
+        // ... video bubbles
+    });
+
+    // ... reactions
+}
+
+function drawChurchMap(ctx, pewsArray) {
+    // ... existing map drawing
+    
+    // --- DRAW BREAKOUT ROOMS ---
+    BREAKOUT_ROOMS.forEach(room => {
+        if (room.id === 'main') return;
+        ctx.fillStyle = room.color;
+        ctx.fillRect(room.x, room.y, room.w, room.h);
+        ctx.strokeStyle = '#34495e';
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(room.x, room.y, room.w, room.h);
+        ctx.setLineDash([]);
+        
+        ctx.fillStyle = '#2c3e50';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(room.name.toUpperCase(), room.x + room.w/2, room.y + 20);
+    });
+
+    // ... pews and walls
+}
 
 // --- GLOBAL HELPERS FOR INDEX.HTML ---
 window.sendReaction = (emoji) => {

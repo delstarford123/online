@@ -225,10 +225,79 @@
             z-index: 1000;
             font-weight: bold;
         }
+
+        /* Bible Sidebar */
+        #bible-sidebar {
+            position: fixed;
+            top: 0;
+            right: -350px;
+            width: 320px;
+            height: 100%;
+            background: white;
+            color: #2c3e50;
+            box-shadow: -5px 0 15px rgba(0,0,0,0.3);
+            transition: right 0.3s ease;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+        #bible-sidebar.open { right: 0; }
+        #bible-toggle {
+            position: absolute;
+            top: 50%;
+            left: -40px;
+            width: 40px;
+            height: 80px;
+            background: #3498db;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 8px 0 0 8px;
+            writing-mode: vertical-rl;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        #bible-content { flex: 1; overflow-y: auto; margin-top: 15px; font-size: 15px; line-height: 1.6; }
+        #bible-header { border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .pastor-bible-controls {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none; /* Only for pastors */
+        }
+        .pastor-bible-controls input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
     <div id="notification-toast">You are now live!</div>
+    
+    <!-- Bible Sidebar -->
+    <div id="bible-sidebar">
+        <div id="bible-toggle">BIBLE</div>
+        <div id="bible-header">
+            <h2 style="margin:0;">Holy Bible</h2>
+            <small id="current-verse-ref">Select a verse to read along</small>
+        </div>
+        <div id="bible-content">
+            <p id="verse-text">Scripture will appear here when the Pastor shares a verse.</p>
+        </div>
+        
+        <div class="pastor-bible-controls" id="pastor-bible-controls">
+            <h4 style="margin: 0 0 10px 0;">Pastor Tools</h4>
+            <input type="text" id="bible-ref-input" placeholder="e.g. John 3:16">
+            <button class="control-btn" style="width:100%; background: #27ae60; font-size: 14px;" id="push-verse-btn">Push to Church</button>
+        </div>
+    </div>
     <div id="lobby-overlay">
         <div class="lobby-card">
             <h1>Sanctuary Lobby</h1>
